@@ -8,6 +8,80 @@ Over the next two weeks you will build a complete, end-to-end **weather intellig
 
 **Why weather?** Weather data is publicly available, refreshed daily, has genuine quality challenges (sensor gaps, interpolation artefacts, seasonal non-stationarity), and is the backbone of decisions in energy, agriculture, logistics, and insurance. It is the perfect playground for asking *"Can we trust this data?"*
 
+
+## 🧪 Team Project Plan (Day 1)
+
+### Problem Statement
+Can we predict which cities in Azerbaijan will have good weather conditions for tourism during May–June?
+
+The model will classify each day as suitable or not suitable for travel, allowing users to compare cities and choose the best destination without manually checking forecasts.
+
+---
+
+### Data Sources
+We use the Open-Meteo API:
+
+- Historical data:
+https://archive-api.open-meteo.com/v1/archive
+
+- Forecast data:
+https://api.open-meteo.com/v1/forecast
+
+Parameters:
+- latitude, longitude
+- start_date, end_date
+- daily weather variables
+
+---
+
+### Cities / Locations
+- Baku, Azerbaijan (40.41, 49.87)
+- Lankaran, Azerbaijan (38.75, 48.85)
+- Gusar, Azerbaijan (41.42, 48.43)
+- Guba, Azerbaijan (41.36, 48.51)
+- Gabala, Azerbaijan (40.58, 47.50)
+- Shaki, Azerbaijan (41.11, 47.10)
+- Ganja, Azerbaijan (40.48, 46.21)
+
+---
+
+### Weather Variables
+
+| Variable Name              | Unit  | Why it is relevant |
+|---------------------------|------|-------------------|
+| temperature_2m_max        | °C   | Determines if daytime conditions are suitable for activities like sightseeing, walking tours, and beach visits; very high temperatures can cause discomfort and limit outdoor time |
+| temperature_2m_min        | °C   | Affects early morning and evening comfort, important for activities like dining outdoors, night walks, or early excursions |
+| precipitation_sum         | mm   | Rain directly disrupts outdoor plans such as sightseeing, hiking, and city exploration; even light rain can reduce travel enjoyment |
+| windspeed_10m_max         | m/s  | Strong winds can negatively affect activities like beach visits, boat trips, and outdoor dining; can also make walking uncomfortable |
+| relative_humidity_2m_mean | %    | High humidity increases perceived temperature and discomfort, affecting physical activities like walking, hiking, and general outdoor exploration |
+| shortwave_radiation_sum   | MJ/m²| Represents sunlight exposure; important for activities like sunbathing and photography, but excessive radiation can lead to overheating or sunburn |
+
+---
+
+### Methodology Outline
+
+Week 1:
+- Collect historical and forecast weather data
+- Store data in DuckDB
+- Clean and prepare dataset
+- Perform feature engineering
+
+Week 2:
+- Conduct exploratory data analysis
+- Perform statistical tests
+- Build classification model
+- Evaluate model performance
+
+---
+
+### Success Criteria
+
+- Pipeline successfully collects and stores weather data
+- Clean and structured dataset
+- Meaningful visualizations and analysis
+- Model correctly classifies good vs bad travel days
+- Clear and interpretable results
+
 ## Project Requirements
 
 | Week | Focus | Skills Applied |
