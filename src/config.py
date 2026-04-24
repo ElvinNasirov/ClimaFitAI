@@ -11,53 +11,36 @@ FORECAST_API_URL = "https://api.open-meteo.com/v1/forecast"
 # Cities / locations
 # ------------------------
 CITIES = [
-    {
-        "name": "Baku",
-        "latitude": 40.41,
-        "longitude": 49.87,
-    },
-    {
-        "name": "Lankaran",
-        "latitude": 38.75,
-        "longitude": 48.85,
-    },
-    {
-        "name": "Guba",
-        "latitude": 41.36,
-        "longitude": 48.51,
-    },
-    {
-        "name": "Gabala",
-        "latitude": 40.58,
-        "longitude": 47.50,
-    },
-    {
-        "name": "Shaki",
-        "latitude": 41.11,
-        "longitude": 47.10,
-    },
+    {"name": "Baku", "latitude": 40.41, "longitude": 49.87},
+    {"name": "Lankaran", "latitude": 38.75, "longitude": 48.85},
+    {"name": "Guba", "latitude": 41.36, "longitude": 48.51},
+    {"name": "Gabala", "latitude": 40.58, "longitude": 47.50},
+    {"name": "Shaki", "latitude": 41.11, "longitude": 47.10},
 ]
+
 
 # ------------------------
 # Historical date range
-# 6 full years
 # ------------------------
-START_DATE = "2020-01-01"
+START_DATE = "2021-01-01"
 END_DATE = "2025-12-31"
 
 
 # ------------------------
 # Daily weather variables
-# Keep these names consistent with your ingestion code
+# MUST match API names exactly
 # ------------------------
 DAILY_VARIABLES = [
+    # 🎯 TARGET VARIABLES
     "temperature_2m_max",
-    "temperature_2m_min",
     "precipitation_sum",
     "wind_speed_10m_max",
-    "apparent_temperature_max",
     "relative_humidity_2m_mean",
-    "weather_code",
+    "cloud_cover_mean",          
+
+    # 🧠 EXTRA FEATURES
+    "apparent_temperature_max",
+    "sunshine_duration",         
 ]
 
 
@@ -68,6 +51,7 @@ DATA_DIR = "data/raw"
 HISTORICAL_SUBDIR = "historical"
 FORECAST_SUBDIR = "forecast"
 
-RAW_FILE_FORMAT = "parquet"   # recommended for this project
-FORECAST_DAYS = 7
+RAW_FILE_FORMAT = "parquet"
+
+FORECAST_DAYS = 7   # keep (API limit)
 TIMEZONE = "auto"
