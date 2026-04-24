@@ -3,7 +3,7 @@ import pandas as pd
 import time
 from datetime import datetime
 
-from src.config import (
+from config import (
     ARCHIVE_API_URL,
     FORECAST_API_URL,
     TIMEZONE,

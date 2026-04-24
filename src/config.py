@@ -22,7 +22,7 @@ CITIES = [
 # ------------------------
 # Historical date range
 # ------------------------
-START_DATE = "2021-01-01"
+START_DATE = "2020-01-01"
 END_DATE = "2025-12-31"
 
 
