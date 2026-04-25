@@ -1,5 +1,6 @@
 # Data
-data/raw/
+data/raw/*
+!data/raw/.gitkeep
 data/*.duckdb
 data/*.duckdb.wal
 
