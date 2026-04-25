@@ -1,6 +1,12 @@
 import pandas as pd
 
 
+def ensure_datetime(df, date_col="time"):
+    df = df.copy()
+    df[date_col] = pd.to_datetime(df[date_col])
+    return df
+
+
 def check_missing_values(df):
     return df.isna().sum()
 
@@ -10,14 +16,17 @@ def check_duplicate_rows(df):
 
 
 def check_duplicate_city_dates(df):
+    df = ensure_datetime(df)
     return df.duplicated(subset=["city", "time"]).sum()
 
 
 def check_date_coverage(df):
+    df = ensure_datetime(df)
     return df.groupby("city")["time"].agg(["min", "max", "count"])
 
 
 def check_missing_dates(df):
+    df = ensure_datetime(df)
     results = {}
 
     for city, group in df.groupby("city"):
@@ -31,8 +40,8 @@ def check_missing_dates(df):
 def check_column_consistency(df1, df2):
     return {
         "same_columns": set(df1.columns) == set(df2.columns),
-        "only_in_first": list(set(df1.columns) - set(df2.columns)),
-        "only_in_second": list(set(df2.columns) - set(df1.columns)),
+        "only_in_first": sorted(list(set(df1.columns) - set(df2.columns))),
+        "only_in_second": sorted(list(set(df2.columns) - set(df1.columns))),
     }
 
 
