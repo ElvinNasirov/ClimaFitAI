@@ -37,22 +37,22 @@ def add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
 
     df["temperature_3d_avg"] = (
         df.groupby("city")["temperature_2m_max"]
-        .transform(lambda x: x.rolling(window=3).mean())
+        .transform(lambda x: x.rolling(window=3, min_periods=1).mean())
     )
 
     df["precipitation_7d_sum"] = (
         df.groupby("city")["precipitation_sum"]
-        .transform(lambda x: x.rolling(window=7).sum())
+        .transform(lambda x: x.rolling(window=7, min_periods=1).sum())
     )
 
     df["wind_3d_avg"] = (
         df.groupby("city")["wind_speed_10m_max"]
-        .transform(lambda x: x.rolling(window=3).mean())
+        .transform(lambda x: x.rolling(window=3, min_periods=1).mean())
     )
 
     df["humidity_7d_avg"] = (
         df.groupby("city")["relative_humidity_2m_mean"]
-        .transform(lambda x: x.rolling(window=7).mean())
+        .transform(lambda x: x.rolling(window=7, min_periods=1).mean())
     )
 
     return df
@@ -78,17 +78,16 @@ def build_features(df: pd.DataFrame):
     df = add_rolling_features(df)
     df, le = add_city_encoding(df)
 
-    # Drop rows with missing values created by lag/rolling
+    # Drop rows with missing values created by lag features
     df = df.dropna().reset_index(drop=True)
 
     return df, le
 
 
 def get_feature_columns():
-    """
-    Return the feature columns used for modeling.
-    """
     return [
+        "apparent_temperature_max",
+        "sunshine_duration",
         "city_encoded",
         "month",
         "day_of_month",
