@@ -4,7 +4,7 @@
 
 ## Team: The Outliers 
 
-## Tourism Weather Risk & Activity Suitability Platform
+## Tourism Weather Risk & Activity Suitability
 
 ### Project Overview
 
