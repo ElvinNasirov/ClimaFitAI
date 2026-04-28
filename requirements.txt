@@ -1,12 +1,29 @@
+# Database
 duckdb
+
+# API
 requests
+
+# Data processing
 pandas
 numpy
+pyarrow
+
+# Visualization
 matplotlib
 seaborn
+missingno
+
+# Statistics
 scipy
 statsmodels
+
+# Machine learning
 scikit-learn
-pyarrow
-missingno
+xgboost
+
+# Notebook
 notebook
+
+# Date utilities
+python-dateutil
