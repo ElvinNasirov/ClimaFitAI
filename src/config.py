@@ -1,4 +1,7 @@
 # src/config.py
+from datetime import date, timedelta
+from dateutil.relativedelta import relativedelta
+
 
 # ------------------------
 # API endpoints
@@ -22,8 +25,13 @@ CITIES = [
 # ------------------------
 # Historical date range
 # ------------------------
-START_DATE = "2020-01-01"
-END_DATE = "2025-12-31"
+HISTORICAL_YEARS = 6
+
+END_DATE_DT = date.today() - timedelta(days=1)
+START_DATE_DT = END_DATE_DT - relativedelta(years=HISTORICAL_YEARS)
+
+START_DATE = START_DATE_DT.strftime("%Y-%m-%d")
+END_DATE = END_DATE_DT.strftime("%Y-%m-%d")
 
 
 # ------------------------
