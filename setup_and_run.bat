@@ -1,31 +1,33 @@
 @echo off
-echo ================================
-echo Weather Pipeline Setup and Run
-echo ================================
+echo Weather Intelligence Pipeline Setup & Run
 
 echo.
-echo Step 1: Creating virtual environment...
-python -m venv .venv
+echo Checking virtual environment...
+
+IF NOT EXIST ".venv\Scripts\activate.bat" (
+    echo Virtual environment not found. Creating .venv...
+    python -m venv .venv
+) ELSE (
+    echo Virtual environment found.
+)
 
 echo.
-echo Step 2: Activating virtual environment...
-call .venv\Scripts\activate
+echo Activating virtual environment...
+call .venv\Scripts\activate.bat
 
 echo.
-echo Step 3: Upgrading pip...
+echo Upgrading pip...
 python -m pip install --upgrade pip
 
 echo.
-echo Step 4: Installing project requirements...
+echo Installing project requirements...
 pip install -r requirements.txt
 
 echo.
-echo Step 5: Running full weather pipeline...
+echo Running full weather pipeline...
 python src\pipeline.py
 
 echo.
-echo ================================
 echo Pipeline finished.
-echo ================================
 
 pause

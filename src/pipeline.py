@@ -46,6 +46,16 @@ from src.db import (
     get_connection,
 )
 
+from src.quality_checks import (
+    check_missing_values,
+    check_duplicate_rows,
+    check_duplicate_city_dates,
+    check_date_coverage,
+    check_missing_dates,
+    check_column_consistency,
+    check_weather_ranges,
+)
+
 from src.cleaning import clean_data
 
 from src.features import (
@@ -86,6 +96,66 @@ def store_dataframe(
             SELECT * FROM temp_df_view;
         """)
 
+def run_clean_data_quality_gate(clean_df: pd.DataFrame) -> None:
+    """
+    Run quality checks after cleaning and before feature engineering.
+
+    The pipeline stops if critical checks fail.
+    """
+    print("Running quality gate on cleaned historical data...")
+
+    failures = []
+
+    clean_df = clean_df.copy()
+    clean_df["time"] = pd.to_datetime(clean_df["time"])
+
+    missing_values = check_missing_values(clean_df)
+    duplicate_rows = check_duplicate_rows(clean_df)
+    duplicate_city_dates = check_duplicate_city_dates(clean_df)
+    missing_dates = check_missing_dates(clean_df)
+    weather_range_violations = check_weather_ranges(clean_df)
+
+    if missing_values.sum() > 0:
+        failures.append(
+            "Missing values found after cleaning:\n"
+            f"{missing_values[missing_values > 0]}"
+        )
+
+    if duplicate_rows > 0:
+        failures.append(f"Duplicate rows found after cleaning: {duplicate_rows}")
+
+    if duplicate_city_dates > 0:
+        failures.append(
+            f"Duplicate city-date records found after cleaning: {duplicate_city_dates}"
+        )
+
+    cities_with_missing_dates = {
+        city: count
+        for city, count in missing_dates.items()
+        if count > 0
+    }
+
+    if cities_with_missing_dates:
+        failures.append(
+            f"Missing dates found after cleaning: {cities_with_missing_dates}"
+        )
+
+    bad_ranges = {
+        col: count
+        for col, count in weather_range_violations.items()
+        if count > 0
+    }
+
+    if bad_ranges:
+        failures.append(
+            f"Weather range violations found after cleaning: {bad_ranges}"
+        )
+
+    if failures:
+        failure_message = "\n\n".join(failures)
+        raise ValueError(f"Quality gate failed:\n\n{failure_message}")
+
+    print("Quality gate passed.")
 
 # ------------------------
 # Feature preparation
@@ -173,11 +243,14 @@ def refresh_raw_data() -> None:
 def prepare_model_features() -> pd.DataFrame:
     """
     Load raw historical data from DuckDB, clean it,
-    build ML features, and save analytics.model_features.
+    run quality checks, build ML features, and save analytics.model_features.
     """
     raw_df = run_query("SELECT * FROM raw.historical")
 
     clean_df = clean_data(raw_df)
+
+    run_clean_data_quality_gate(clean_df)
+
     feature_df, _ = build_features(clean_df)
 
     store_dataframe(
@@ -459,25 +532,28 @@ def run_pipeline(refresh_data: bool = True) -> dict[str, pd.DataFrame]:
     dict
         Dictionary with model_features and final_28d_forecast DataFrames.
     """
-    print("Step 1/6 — Creating schemas...")
+    print("Step 1/7 — Creating schemas...")
     create_schemas()
 
     if refresh_data:
-        print("Step 2/6 — Refreshing raw API data...")
+        print("Step 2/7 — Refreshing raw API data...")
         refresh_raw_data()
     else:
-        print("Step 2/6 — Reusing existing raw parquet files...")
+        print("Step 2/7 — Reusing existing raw parquet files...")
 
-    print("Step 3/6 — Loading raw parquet files into DuckDB...")
+    print("Step 3/7 — Loading raw parquet files into DuckDB...")
     load_raw_data()
 
-    print("Step 4/6 — Cleaning data and building model features...")
+    print("Step 4/7 — Running data quality gate...")
+    run_quality_gate()
+
+    print("Step 5/7 — Cleaning data and building model features...")
     feature_df = prepare_model_features()
 
-    print("Step 5/6 — Training model and building final 28-day forecast...")
+    print("Step 6/7 — Training model and building final 28-day forecast...")
     final_forecast = build_final_28d_forecast(feature_df)
 
-    print("Step 6/6 — Pipeline completed.")
+    print("Step 7/7 — Pipeline completed.")
     print(f"Model feature rows: {len(feature_df)}")
     print(f"Final forecast rows: {len(final_forecast)}")
 
