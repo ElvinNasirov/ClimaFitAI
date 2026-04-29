@@ -25,10 +25,9 @@ def get_activity_recommendation(weather_data, city):
     except KeyError:
         return {"status": "error", "message": "Missing required weather fields"}
 
-    # -----------------------------
-    # WEATHER LOGIC (SMART RULES)
-    # -----------------------------
-
+    
+    # WEATHER LOGIC 
+    
     # Rain or bad weather
     if rain > 3 or code >= 60:
         activity_type = "indoor"
@@ -58,9 +57,8 @@ def get_activity_recommendation(weather_data, city):
         activity_type = "mixed"
         reason = "Moderate conditions"
 
-    # -----------------------------
     # CITY-SPECIFIC SUGGESTIONS
-    # -----------------------------
+    
     suggestions = get_city_suggestions(city, activity_type)
 
     return {
@@ -71,10 +69,8 @@ def get_activity_recommendation(weather_data, city):
         "suggestions": suggestions
     }
 
-
-# -----------------------------
 # CITY LOGIC
-# -----------------------------
+
 def get_city_suggestions(city, activity_type):
     city = city.lower()
 
@@ -83,7 +79,7 @@ def get_city_suggestions(city, activity_type):
             "indoor": ["Museums", "Shopping malls", "Cafes"],
             "hot": ["Caspian beach", "Pool", "Water parks"],
             "perfect": ["Boulevard walk", "Old city tour"],
-            "cool": ["Cafe hopping", "Light прогулка"],
+            "cool": ["Cafe hopping", "Light walk"],
             "mixed": ["Short outdoor walks + cafes"]
         },
 
@@ -99,7 +95,7 @@ def get_city_suggestions(city, activity_type):
             "indoor": ["Hotels", "Restaurants"],
             "hot": ["Beach", "Swimming"],
             "perfect": ["Nature exploration"],
-            "cool": ["Light прогулка"],
+            "cool": ["Light walk"],
             "mixed": ["Mixed outdoor + rest"]
         },
 
@@ -124,17 +120,3 @@ def get_city_suggestions(city, activity_type):
         return ["General sightseeing", "Cafes"]
 
     return data[city].get(activity_type, ["General activities"])
-
-
-if __name__ == "__main__":
-    sample_weather = {
-        "temperature_2m_max": 31,
-        "precipitation_sum": 0,
-        "wind_speed_10m_max": 5,
-        "apparent_temperature_max": 34,
-        "relative_humidity_2m_mean": 75,
-        "weather_code": 1
-    }
-
-    result = get_activity_recommendation(sample_weather, "Lankaran")
-    print(result)
