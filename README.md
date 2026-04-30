@@ -38,6 +38,7 @@ Parameters:
 - **Roya:** Data Quality & Preprocessing, Statistical Analysis & Hypothesis Testing  
 - **Sama:** Data Quality support, Activity Recommendation Logic 
 - **Jala:** Web Interface & Presentation  
+- **Jala & Sama:** Project Ideation & Data Definition (initial project concept and selection of relevant variables)
 
 ---
 
