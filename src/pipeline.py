@@ -1,70 +1,64 @@
 """
 End-to-end Weather Intelligence Pipeline.
 
-This pipeline:
-1. Loads raw parquet files into DuckDB
-2. Cleans historical weather data
-3. Builds model-ready features
-4. Trains the final multi-output regression model
-5. Builds a hybrid 28-day forecast:
+Pipeline flow:
+1. Fetch or reuse raw Open-Meteo data
+2. Load raw parquet files into DuckDB
+3. Validate raw data project scope
+4. Clean historical weather data
+5. Run quality gate
+6. Build model-ready features
+7. Train multi-output regression models
+8. Build a hybrid 28-day forecast:
    - days 1-7 from Open-Meteo API forecast
-   - days 8-28 from ML model
-6. Saves outputs into DuckDB
+   - days 8-28 from ML models
+9. Save outputs into DuckDB
 """
 
-# Imports
-import sys
 from pathlib import Path
-
-PROJECT_ROOT = Path.cwd().parent
-sys.path.append(str(PROJECT_ROOT))
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from sklearn.base import clone
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.multioutput import MultiOutputRegressor
 
+from src.cleaning import clean_data
 from src.config import (
     CITIES,
-    START_DATE,
-    END_DATE,
     DAILY_VARIABLES,
     DATA_DIR,
-    HISTORICAL_SUBDIR,
-    FORECAST_SUBDIR,
+    END_DATE,
     FORECAST_DAYS,
+    FORECAST_SUBDIR,
+    HISTORICAL_SUBDIR,
+    START_DATE,
 )
-
-from src.ingestion import (
-    fetch_all_cities,
-    fetch_forecast_all_cities,
-)
-
 from src.db import (
     create_schemas,
+    get_connection,
     load_raw_data,
     run_query,
-    get_connection,
 )
-
-from src.quality_checks import (
-    check_missing_values,
-    check_duplicate_rows,
-    check_duplicate_city_dates,
-    check_missing_dates,
-    check_weather_ranges,
-)
-
-from src.cleaning import clean_data
-
 from src.features import (
     build_features,
     get_feature_columns,
     get_target_columns,
 )
+from src.ingestion import (
+    fetch_all_cities,
+    fetch_forecast_all_cities,
+)
+from src.quality_checks import (
+    check_duplicate_city_dates,
+    check_duplicate_rows,
+    check_missing_dates,
+    check_missing_values,
+    check_weather_ranges,
+)
 
-# Project paths
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,7 +66,6 @@ RAW_DATA_DIR = PROJECT_ROOT / DATA_DIR
 RAW_HISTORICAL_DIR = RAW_DATA_DIR / HISTORICAL_SUBDIR
 RAW_FORECAST_DIR = RAW_DATA_DIR / FORECAST_SUBDIR
 
-# General DuckDB helper
 
 def store_dataframe(
     df: pd.DataFrame,
@@ -81,6 +74,7 @@ def store_dataframe(
 ) -> None:
     """
     Store a pandas DataFrame into DuckDB.
+
     Existing table is replaced.
     """
     with get_connection() as conn:
@@ -89,14 +83,53 @@ def store_dataframe(
 
         conn.execute(f"""
             CREATE OR REPLACE TABLE {schema}.{table_name} AS
-            SELECT * FROM temp_df_view;
+            SELECT *
+            FROM temp_df_view;
         """)
+
+
+def _print_check_results(checks: list[dict[str, Any]]) -> None:
+    """
+    Print quality check results in a compact CLI-friendly format.
+    """
+    for check in checks:
+        print(f"- {check['check']}: {check['status']}")
+
+
+def _raise_if_checks_failed(
+    checks: list[dict[str, Any]],
+    gate_name: str,
+    fail_statuses: tuple[str, ...] = ("WARN", "FAIL"),
+) -> None:
+    """
+    Raise an error if any check has a failing status.
+    """
+    failed_checks = [
+        check for check in checks
+        if check["status"] in fail_statuses
+    ]
+
+    if not failed_checks:
+        return
+
+    messages = []
+
+    for check in failed_checks:
+        messages.append(
+            f"{check['check']} — {check['status']}\n"
+            f"Details: {check['details']}"
+        )
+
+    raise ValueError(
+        f"{gate_name} failed:\n\n" + "\n\n".join(messages)
+    )
+
 
 def run_raw_project_scope_gate() -> None:
     """
     Validate that raw data belongs to the project scope before cleaning.
 
-    This check protects the pipeline from corrupted, unrelated, or tampered data.
+    This protects the pipeline from unrelated, corrupted, or tampered data.
     """
     print("Running raw project-scope gate...")
 
@@ -116,53 +149,66 @@ def run_raw_project_scope_gate() -> None:
 
     checks = []
 
-    def add_check(name, status, details):
+    def add_check(check: str, status: str, details: Any) -> None:
         checks.append({
-            "check": name,
+            "check": check,
             "status": status,
             "details": details,
         })
 
-    # Required columns
-    historical_missing_cols = sorted(required_columns - set(historical_df.columns))
-    forecast_missing_cols = sorted(required_columns - set(forecast_df.columns))
+    historical_missing_cols = sorted(
+        required_columns - set(historical_df.columns)
+    )
+    forecast_missing_cols = sorted(
+        required_columns - set(forecast_df.columns)
+    )
 
     add_check(
         "historical_required_columns",
         "PASS" if not historical_missing_cols else "FAIL",
-        historical_missing_cols if historical_missing_cols else "all required columns present",
+        historical_missing_cols or "all required columns present",
     )
 
     add_check(
         "forecast_required_columns",
         "PASS" if not forecast_missing_cols else "FAIL",
-        forecast_missing_cols if forecast_missing_cols else "all required columns present",
+        forecast_missing_cols or "all required columns present",
     )
 
-    # Stop early if required columns are missing
     if historical_missing_cols or forecast_missing_cols:
-        failed = [check for check in checks if check["status"] != "PASS"]
-        for check in checks:
-            print(f"- {check['check']}: {check['status']}")
-        raise ValueError(f"Raw project-scope gate failed: {failed}")
+        print("Raw project-scope checks:")
+        _print_check_results(checks)
+        _raise_if_checks_failed(
+            checks=checks,
+            gate_name="Raw project-scope gate",
+            fail_statuses=("FAIL",),
+        )
 
-    historical_df["time"] = pd.to_datetime(historical_df["time"], errors="coerce")
-    forecast_df["time"] = pd.to_datetime(forecast_df["time"], errors="coerce")
+    historical_df["time"] = pd.to_datetime(
+        historical_df["time"],
+        errors="coerce",
+    )
+    forecast_df["time"] = pd.to_datetime(
+        forecast_df["time"],
+        errors="coerce",
+    )
 
-    # Date parse validity
     add_check(
         "historical_date_parse",
         "PASS" if historical_df["time"].notna().all() else "FAIL",
-        "all dates parsed" if historical_df["time"].notna().all() else "invalid historical dates found",
+        "all dates parsed"
+        if historical_df["time"].notna().all()
+        else "invalid historical dates found",
     )
 
     add_check(
         "forecast_date_parse",
         "PASS" if forecast_df["time"].notna().all() else "FAIL",
-        "all dates parsed" if forecast_df["time"].notna().all() else "invalid forecast dates found",
+        "all dates parsed"
+        if forecast_df["time"].notna().all()
+        else "invalid forecast dates found",
     )
 
-    # City scope
     historical_cities = set(historical_df["city"].unique())
     forecast_cities = set(forecast_df["city"].unique())
 
@@ -184,38 +230,45 @@ def run_raw_project_scope_gate() -> None:
         },
     )
 
-    # Historical date range
-    actual_hist_min = historical_df["time"].min()
-    actual_hist_max = historical_df["time"].max()
+    actual_historical_start = historical_df["time"].min()
+    actual_historical_end = historical_df["time"].max()
 
     add_check(
         "historical_date_range",
         "PASS"
-        if actual_hist_min == historical_start and actual_hist_max == historical_end
+        if actual_historical_start == historical_start
+        and actual_historical_end == historical_end
         else "FAIL",
         {
             "expected": f"{historical_start.date()} → {historical_end.date()}",
-            "actual": f"{actual_hist_min.date()} → {actual_hist_max.date()}",
+            "actual": (
+                f"{actual_historical_start.date()} "
+                f"→ {actual_historical_end.date()}"
+            ),
         },
     )
 
-    # Forecast date range
-    actual_forecast_min = forecast_df["time"].min()
-    actual_forecast_max = forecast_df["time"].max()
+    actual_forecast_start = forecast_df["time"].min()
+    actual_forecast_end = forecast_df["time"].max()
 
     add_check(
         "forecast_date_range",
         "PASS"
-        if actual_forecast_min == expected_forecast_start
-        and actual_forecast_max == expected_forecast_end
+        if actual_forecast_start == expected_forecast_start
+        and actual_forecast_end == expected_forecast_end
         else "FAIL",
         {
-            "expected": f"{expected_forecast_start.date()} → {expected_forecast_end.date()}",
-            "actual": f"{actual_forecast_min.date()} → {actual_forecast_max.date()}",
+            "expected": (
+                f"{expected_forecast_start.date()} "
+                f"→ {expected_forecast_end.date()}"
+            ),
+            "actual": (
+                f"{actual_forecast_start.date()} "
+                f"→ {actual_forecast_end.date()}"
+            ),
         },
     )
 
-    # Row count per city
     expected_historical_rows = (
         historical_end - historical_start
     ).days + 1
@@ -252,28 +305,16 @@ def run_raw_project_scope_gate() -> None:
     )
 
     print("Raw project-scope checks:")
-    for check in checks:
-        print(f"- {check['check']}: {check['status']}")
+    _print_check_results(checks)
 
-    failed_checks = [
-        check for check in checks
-        if check["status"] != "PASS"
-    ]
-
-    if failed_checks:
-        messages = []
-
-        for check in failed_checks:
-            messages.append(
-                f"{check['check']} — {check['status']}\n"
-                f"Details: {check['details']}"
-            )
-
-        raise ValueError(
-            "Raw project-scope gate failed:\n\n" + "\n\n".join(messages)
-        )
+    _raise_if_checks_failed(
+        checks=checks,
+        gate_name="Raw project-scope gate",
+        fail_statuses=("FAIL",),
+    )
 
     print("Raw project-scope gate passed.")
+
 
 def run_clean_data_quality_gate(clean_df: pd.DataFrame) -> None:
     """
@@ -294,48 +335,33 @@ def run_clean_data_quality_gate(clean_df: pd.DataFrame) -> None:
         check_weather_ranges(clean_df),
     ]
 
-    failed_checks = [
-        check for check in checks
-        if check["status"] in ["WARN", "FAIL"]
-    ]
-
     print("Quality checks:")
-    for check in checks:
-        print(f"- {check['check']}: {check['status']}")
+    _print_check_results(checks)
 
-    if failed_checks:
-        messages = []
-
-        for check in failed_checks:
-            messages.append(
-                f"{check['check']} — {check['status']}\n"
-                f"Details: {check['details']}"
-            )
-
-        raise ValueError(
-            "Quality gate failed:\n\n" + "\n\n".join(messages)
-        )
+    _raise_if_checks_failed(
+        checks=checks,
+        gate_name="Quality gate",
+        fail_statuses=("WARN", "FAIL"),
+    )
 
     print("Quality gate passed.")
 
-# Feature preparation
 
 def clear_raw_parquet_files() -> None:
     """
     Remove old raw parquet files before writing fresh API outputs.
-
-    This prevents stale files from being loaded into DuckDB.
     """
     RAW_HISTORICAL_DIR.mkdir(parents=True, exist_ok=True)
     RAW_FORECAST_DIR.mkdir(parents=True, exist_ok=True)
 
-    for file in RAW_HISTORICAL_DIR.glob("*.parquet"):
-        file.unlink()
+    for file_path in RAW_HISTORICAL_DIR.glob("*.parquet"):
+        file_path.unlink()
 
-    for file in RAW_FORECAST_DIR.glob("*.parquet"):
-        file.unlink()
+    for file_path in RAW_FORECAST_DIR.glob("*.parquet"):
+        file_path.unlink()
 
     print("Old raw parquet files removed.")
+
 
 def save_city_frames_to_parquet(
     data_by_city: dict[str, pd.DataFrame],
@@ -347,27 +373,22 @@ def save_city_frames_to_parquet(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    saved_files = []
+    saved_count = 0
 
-    for city_name, df in data_by_city.items():
+    for city_name, city_df in data_by_city.items():
         safe_city = city_name.lower().replace(" ", "_")
         file_path = output_dir / f"{safe_city}_{suffix}.parquet"
 
-        df.to_parquet(file_path, index=False)
-        saved_files.append(file_path)
+        city_df.to_parquet(file_path, index=False)
+        saved_count += 1
 
-    print(f"Saved {len(saved_files)} parquet files to {output_dir}")
+    print(f"Saved {saved_count} parquet files to {output_dir}")
+
 
 def refresh_raw_data() -> None:
     """
     Fetch fresh historical and forecast data from Open-Meteo API,
     then save raw parquet files.
-
-    Historical:
-        START_DATE → END_DATE
-
-    Forecast:
-        next 7 days from Forecast API
     """
     print("Refreshing raw API data...")
     print(f"Historical range: {START_DATE} → {END_DATE}")
@@ -376,11 +397,11 @@ def refresh_raw_data() -> None:
     clear_raw_parquet_files()
 
     historical_data = fetch_all_cities(
-    cities_config=CITIES,
-    start_date=START_DATE,
-    end_date=END_DATE,
-    variables=DAILY_VARIABLES,
-    verbose=False,
+        cities_config=CITIES,
+        start_date=START_DATE,
+        end_date=END_DATE,
+        variables=DAILY_VARIABLES,
+        verbose=False,
     )
 
     save_city_frames_to_parquet(
@@ -390,9 +411,9 @@ def refresh_raw_data() -> None:
     )
 
     forecast_data = fetch_forecast_all_cities(
-    cities_config=CITIES,
-    variables=DAILY_VARIABLES,
-    verbose=False,
+        cities_config=CITIES,
+        variables=DAILY_VARIABLES,
+        verbose=False,
     )
 
     save_city_frames_to_parquet(
@@ -403,10 +424,11 @@ def refresh_raw_data() -> None:
 
     print("Raw API data refreshed.")
 
+
 def prepare_model_features() -> pd.DataFrame:
     """
-    Load raw historical data from DuckDB, clean it,
-    run quality checks, build ML features, and save analytics.model_features.
+    Load raw historical data from DuckDB, clean it, run quality checks,
+    build ML features, and save analytics.model_features.
     """
     raw_df = run_query("SELECT * FROM raw.historical")
 
@@ -427,8 +449,7 @@ def prepare_model_features() -> pd.DataFrame:
 
 def add_target_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Add calendar features for the target date.
-    These tell the model which future date it is predicting.
+    Add calendar features for the future target date.
     """
     df = df.copy()
 
@@ -447,31 +468,38 @@ def add_target_calendar_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def make_supervised(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
+
+def make_supervised(
+    feature_df: pd.DataFrame,
+    horizon: int,
+) -> pd.DataFrame:
     """
-    Create supervised dataset for a forecast horizon.
-
-    time = origin date
-    target_time = date being predicted
-    target columns = weather values at target_time
+    Create supervised training data for a specific forecast horizon.
     """
-    out = df.copy().sort_values(["city", "time"]).reset_index(drop=True)
+    supervised_df = (
+        feature_df.copy()
+        .sort_values(["city", "time"])
+        .reset_index(drop=True)
+    )
 
-    out["target_time"] = out.groupby("city")["time"].shift(-horizon)
+    supervised_df["target_time"] = (
+        supervised_df.groupby("city")["time"].shift(-horizon)
+    )
 
-    for col in get_target_columns():
-        out[f"{col}_target"] = out.groupby("city")[col].shift(-horizon)
+    for target in get_target_columns():
+        supervised_df[f"{target}_target"] = (
+            supervised_df.groupby("city")[target].shift(-horizon)
+        )
 
-    out = out.dropna().reset_index(drop=True)
-    out = add_target_calendar_features(out)
+    supervised_df = supervised_df.dropna().reset_index(drop=True)
+    supervised_df = add_target_calendar_features(supervised_df)
 
-    return out
+    return supervised_df
+
 
 def get_horizon_feature_columns() -> list[str]:
     """
     Return feature columns used for horizon-aware forecasting.
-
-    These include base engineered features plus target-date calendar features.
     """
     return get_feature_columns() + [
         "target_month",
@@ -481,35 +509,53 @@ def get_horizon_feature_columns() -> list[str]:
         "target_day_cos",
     ]
 
-# Model training
 
-def train_final_model(
+def train_horizon_model(
     feature_df: pd.DataFrame,
-    horizon: int = 28,
+    horizon: int,
 ) -> MultiOutputRegressor:
     """
-    Train final multi-output regression model.
-
-    GradientBoosting was selected from the modeling notebook
-    because it had the best average RMSE in backtesting.
+    Train a multi-output regression model for one forecast horizon.
     """
-    supervised_df = make_supervised(feature_df, horizon=horizon)
+    supervised_df = make_supervised(
+        feature_df=feature_df,
+        horizon=horizon,
+    )
 
     feature_cols = get_horizon_feature_columns()
-    target_cols = [f"{col}_target" for col in get_target_columns()]
+    target_cols = [f"{target}_target" for target in get_target_columns()]
 
-    X = supervised_df[feature_cols]
-    y = supervised_df[target_cols]
+    X_train = supervised_df[feature_cols]
+    y_train = supervised_df[target_cols]
 
     model = MultiOutputRegressor(
         GradientBoostingRegressor(random_state=42)
     )
 
-    model.fit(X, y)
+    model.fit(X_train, y_train)
 
     return model
 
-# Forecast preparation
+
+def train_direct_horizon_models(
+    feature_df: pd.DataFrame,
+    horizons: list[int],
+) -> dict[int, MultiOutputRegressor]:
+    """
+    Train one direct forecasting model per horizon.
+    """
+    trained_models = {}
+
+    for horizon in horizons:
+        print(f"Training GradientBoosting model for ML horizon={horizon}...")
+
+        trained_models[horizon] = train_horizon_model(
+            feature_df=feature_df,
+            horizon=horizon,
+        )
+
+    return trained_models
+
 
 def prepare_api_forecast_output() -> pd.DataFrame:
     """
@@ -529,7 +575,9 @@ def prepare_api_forecast_output() -> pd.DataFrame:
         - pd.Timedelta(days=1)
     )
 
-    forecast_df["forecast_horizon"] = forecast_df.groupby("city").cumcount() + 1
+    forecast_df["forecast_horizon"] = (
+        forecast_df.groupby("city").cumcount() + 1
+    )
     forecast_df["target_time"] = forecast_df["time"]
     forecast_df["source"] = "api_forecast"
 
@@ -543,32 +591,32 @@ def prepare_api_forecast_output() -> pd.DataFrame:
 
     return forecast_df[output_cols]
 
+
 def prepare_latest_origin() -> pd.DataFrame:
     """
-    Combine historical actuals + 7-day API forecast,
-    rebuild features, and return the latest available feature row per city.
+    Build the latest feature row per city using historical data plus API forecast.
 
-    This latest row becomes the starting point for ML days 8-28.
+    The latest 7-day API forecast becomes the origin for ML days 8-28.
     """
     historical_raw = run_query("SELECT * FROM raw.historical").copy()
-    historical_raw["time"] = pd.to_datetime(historical_raw["time"])
-
     forecast_raw = run_query("SELECT * FROM raw.forecast").copy()
+
+    historical_raw["time"] = pd.to_datetime(historical_raw["time"])
     forecast_raw["time"] = pd.to_datetime(forecast_raw["time"])
 
-    combined = pd.concat(
+    combined_df = pd.concat(
         [historical_raw, forecast_raw],
         ignore_index=True,
     )
 
-    combined = (
-        combined
+    combined_df = (
+        combined_df
         .sort_values(["city", "time"])
         .drop_duplicates(subset=["city", "time"], keep="last")
         .reset_index(drop=True)
     )
 
-    future_feature_df, _ = build_features(combined)
+    future_feature_df, _ = build_features(combined_df)
 
     latest_origin = (
         future_feature_df
@@ -580,15 +628,16 @@ def prepare_latest_origin() -> pd.DataFrame:
 
     return latest_origin
 
+
 def predict_ml_days_8_to_28(
-    model: MultiOutputRegressor,
+    horizon_models: dict[int, MultiOutputRegressor],
     latest_origin_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Predict forecast horizons 8-28 using the trained ML model.
+    Predict forecast days 8-28 using direct horizon models.
 
-    Days 1-7 are already covered by API forecast.
-    ML model predicts the remaining 21 days.
+    Horizon 1 after the API forecast corresponds to final forecast day 8.
+    Horizon 21 after the API forecast corresponds to final forecast day 28.
     """
     feature_cols = get_horizon_feature_columns()
     target_cols = get_target_columns()
@@ -599,9 +648,9 @@ def predict_ml_days_8_to_28(
         city = origin_row["city"]
         origin_time = pd.to_datetime(origin_row["time"])
 
-        for forecast_horizon in range(8, 29):
-            days_after_api = forecast_horizon - 7
-            target_time = origin_time + pd.Timedelta(days=days_after_api)
+        for ml_horizon, model in horizon_models.items():
+            forecast_horizon = ml_horizon + FORECAST_DAYS
+            target_time = origin_time + pd.Timedelta(days=ml_horizon)
 
             row = origin_row.copy()
             row["target_time"] = target_time
@@ -610,7 +659,7 @@ def predict_ml_days_8_to_28(
             row_df = add_target_calendar_features(row_df)
 
             X_future = row_df[feature_cols]
-            pred = model.predict(X_future)[0]
+            prediction = model.predict(X_future)[0]
 
             result = {
                 "city": city,
@@ -621,29 +670,36 @@ def predict_ml_days_8_to_28(
             }
 
             for i, target in enumerate(target_cols):
-                result[target] = pred[i]
+                result[target] = prediction[i]
 
             rows.append(result)
 
     return pd.DataFrame(rows)
 
+
 def build_final_28d_forecast(
     feature_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Build final hybrid 28-day forecast.
+    Build the final hybrid 28-day forecast.
 
-    Days 1-7:
-        Open-Meteo API forecast
-
-    Days 8-28:
-        ML model forecast
+    Days 1-7 come from Open-Meteo API.
+    Days 8-28 come from direct ML horizon models.
     """
-    model = train_final_model(feature_df, horizon=28)
-
     api_7d = prepare_api_forecast_output()
     latest_origin = prepare_latest_origin()
-    ml_21d = predict_ml_days_8_to_28(model, latest_origin)
+
+    ml_horizons = list(range(1, 22))
+
+    horizon_models = train_direct_horizon_models(
+        feature_df=feature_df,
+        horizons=ml_horizons,
+    )
+
+    ml_21d = predict_ml_days_8_to_28(
+        horizon_models=horizon_models,
+        latest_origin_df=latest_origin,
+    )
 
     final_forecast = pd.concat(
         [api_7d, ml_21d],
@@ -664,24 +720,10 @@ def build_final_28d_forecast(
 
     return final_forecast
 
-# Main pipeline
 
 def run_pipeline(refresh_data: bool = True) -> dict[str, pd.DataFrame]:
     """
     Run the full weather intelligence pipeline.
-
-    Parameters
-    ----------
-    refresh_data:
-        If True, fetch fresh historical and forecast data from Open-Meteo API
-        before rebuilding DuckDB and model outputs.
-
-        If False, reuse existing raw parquet files.
-
-    Returns
-    -------
-    dict
-        Dictionary with model_features and final_28d_forecast DataFrames.
     """
     print("Step 1/7 — Creating schemas...")
     create_schemas()
@@ -701,7 +743,7 @@ def run_pipeline(refresh_data: bool = True) -> dict[str, pd.DataFrame]:
     print("Step 5/7 — Cleaning data, running quality checks, and building model features...")
     feature_df = prepare_model_features()
 
-    print("Step 6/7 — Training model and building final 28-day forecast...")
+    print("Step 6/7 — Training models and building final 28-day forecast...")
     final_forecast = build_final_28d_forecast(feature_df)
 
     print("Step 7/7 — Pipeline completed.")
@@ -712,6 +754,7 @@ def run_pipeline(refresh_data: bool = True) -> dict[str, pd.DataFrame]:
         "model_features": feature_df,
         "final_28d_forecast": final_forecast,
     }
+
 
 if __name__ == "__main__":
     run_pipeline(refresh_data=True)
