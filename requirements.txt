@@ -28,3 +28,6 @@ ipykernel
 
 # Date utilities
 python-dateutil
+
+# Hypothesis
+scikit_posthocs
