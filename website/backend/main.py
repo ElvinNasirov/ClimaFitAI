@@ -194,13 +194,21 @@ def on_startup() -> None:
     Triggered once when `uvicorn main:app` starts.
 
     Strategy:
-      - Serve requests immediately using the existing data/weather.duckdb.
-      - We do NOT automatically run the ML pipeline on boot anymore.
+      - Check if fresh data exists in DuckDB.
+      - If yes, serve requests immediately.
+      - If no (e.g. first deploy on Render), run the pipeline.
+      - Start the 24h background scheduler.
     """
-    log.info("✅ Startup: backend is configured to read from existing DuckDB only. Pipeline will NOT auto-run.")
-    # Mark as 'already ran' so the 503 guard in /forecast doesn't block requests
-    pipeline_state["run_count"]  = 1
-    pipeline_state["last_run_at"] = datetime.utcnow().isoformat() + "Z"
+    _start_scheduler()
+
+    if _has_fresh_forecast():
+        log.info("✅ Startup: fresh data found in DuckDB. Pipeline will NOT auto-run.")
+        pipeline_state["run_count"]  = 1
+        pipeline_state["last_run_at"] = datetime.utcnow().isoformat() + "Z"
+    else:
+        log.info("⚠️ Startup: No fresh data found. Auto-running pipeline...")
+        # Since run_count is 0, the /forecast endpoint will correctly return 503 until it finishes
+        threading.Thread(target=_run_pipeline_background, kwargs={"refresh_data": True}, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
