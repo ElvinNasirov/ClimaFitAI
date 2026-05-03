@@ -32,7 +32,7 @@ Parameters:
 
 ---
 
-### 👥 Team & Responsibilities
+###  Team & Responsibilities
 
 - **Elvin:** Machine Learning & Pipeline  
 - **Roya:** Data Quality & Preprocessing, Statistical Analysis & Hypothesis Testing  
@@ -45,7 +45,7 @@ Parameters:
 ### Technical Specifications
 
 #### 1. Dataset History Length  
-We use **5+ years of historical daily weather data (2021 up to the most recent available date)** to capture long-term seasonal patterns and climate variability across Azerbaijan.
+We use **6 years of historical daily weather data** (from 6 years ago up to the most recent available date) to capture long-term seasonal patterns and climate variability across Azerbaijan.
 
 #### 2. Dataset Granularity  
 The data is processed at a **daily granularity**, where each record represents a 24-hour summary of weather conditions for a specific city.
@@ -87,7 +87,7 @@ We use a **multi-output regression model** to predict key weather variables requ
   Reflects how sunny a day is, providing additional context for outdoor activity quality and user experience.
 
 - **city (encoded)**  
-  Captures location-specific climate patterns across regions (Baku, Lankaran, Guba, Gabala, Shaki).
+  Captures location-specific climate patterns across regions (Baku, Lankaran, Guba, Gabala, Shaki). City names are normalised to title-case throughout the pipeline.
 
 ---
 
@@ -132,7 +132,7 @@ We use a **multi-output regression model** to predict key weather variables requ
   7-day average humidity, reflecting persistent atmospheric conditions.
 
 ---
-## 🧠 Feature Table
+## Feature Table
 
 | Source | Feature Name | Unit | Aggregation |
 |--------|-------------|------|-------------|
@@ -157,7 +157,7 @@ We use historical data for model training and evaluation, applying a time-based 
 
 Additionally, we integrate **7-day forecast data from the API** for short-term activity suitability decisions.
 
-For medium-range predictions, we use a **multi-output regression model (Random Forest Regressor)** to predict all target variables simultaneously.
+For medium-range predictions, we use a **multi-output regression model (Gradient Boosting Regressor)** to predict all target variables simultaneously.
 
 This approach allows us to:
 - maintain a clean and unified forecasting pipeline  
@@ -166,7 +166,7 @@ This approach allows us to:
 
 ---
 
-## ⚙️ System Flow
+## System Flow
 
 **1. Data Sources**
 - Historical Weather Data (Open-Meteo API)
@@ -180,7 +180,7 @@ This approach allows us to:
   - Calendar features  
 
 **3. Modeling**
-- Multi-output Regression Model (Random Forest Regressor)
+- Multi-output Regression Model (Gradient Boosting Regressor)
 
 **4. Predictions**
 - Predicted Weather Variables:
@@ -198,7 +198,7 @@ This approach allows us to:
 - Natural language explanation
 
 
-## 📅 Project Timeline
+## Project Timeline
 
 | Date | Daily Activities |
 |------|------------------|
