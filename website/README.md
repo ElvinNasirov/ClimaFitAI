@@ -40,14 +40,14 @@ climafit-ai/
             └── ActivityList.js  # Renders city-specific activity suggestions
 ```
 
-> The database lives at `data/weather.duckdb` (project root), **not** inside `climafit-ai/`. It is shared with the main pipeline.
+> The database lives at `data/weather.duckdb` (project root), **not** inside `website/`. It is shared with the main pipeline.
 
 ## How to Run
 
 ### 1. Start the Backend (FastAPI)
 
 ```bash
-cd climafit-ai/backend
+cd website/backend
 pip install -r requirements.txt
 python -m uvicorn main:app --reload
 ```

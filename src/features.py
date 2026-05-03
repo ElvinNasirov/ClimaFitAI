@@ -17,6 +17,7 @@ TARGET_COLUMNS = [
     "wind_speed_10m_max",
     "relative_humidity_2m_mean",
     "cloud_cover_mean",
+    "sunshine_duration",
 ]
 
 

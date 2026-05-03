@@ -25,7 +25,7 @@ from typing import List
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 import duckdb
 
@@ -75,6 +75,11 @@ app.mount("/src",    StaticFiles(directory=FRONTEND_DIR / "src"),    name="src")
 def serve_index() -> FileResponse:
     """Serve the frontend index.html at the root URL."""
     return FileResponse(FRONTEND_DIR / "index.html")
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    """Return an empty response for favicon to prevent 404 logs."""
+    return Response(content=b"", media_type="image/x-icon")
 
 # ---------------------------------------------------------------------------
 # Shared DuckDB — same file used by the main pipeline (src/db.py)
@@ -189,31 +194,13 @@ def on_startup() -> None:
     Triggered once when `uvicorn main:app` starts.
 
     Strategy:
-      - If DuckDB already has forecast rows for today or later, the data is
-        still valid — skip the pipeline and serve immediately.
-      - If data is missing or stale, kick off the pipeline in a background
-        thread so the server accepts requests while it warms up.
+      - Serve requests immediately using the existing data/weather.duckdb.
+      - We do NOT automatically run the ML pipeline on boot anymore.
     """
-    if _has_fresh_forecast():
-        log.info(
-            "✅ Fresh forecast data found in DuckDB — skipping startup pipeline run. "
-            "Next auto-refresh in up to %d hours.",
-            REFRESH_INTERVAL_HOURS,
-        )
-        # Mark as 'already ran' so the 503 guard in /forecast doesn't block requests
-        pipeline_state["run_count"]  = 1
-        pipeline_state["last_run_at"] = datetime.utcnow().isoformat() + "Z"
-    else:
-        log.info("🚀 No fresh data found — launching pipeline in background thread...")
-        t = threading.Thread(
-            target=_run_pipeline_background,
-            kwargs={"refresh_data": True},
-            daemon=True,
-            name="pipeline-startup",
-        )
-        t.start()
-
-    _start_scheduler()
+    log.info("✅ Startup: backend is configured to read from existing DuckDB only. Pipeline will NOT auto-run.")
+    # Mark as 'already ran' so the 503 guard in /forecast doesn't block requests
+    pipeline_state["run_count"]  = 1
+    pipeline_state["last_run_at"] = datetime.utcnow().isoformat() + "Z"
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +287,8 @@ def load_from_duckdb(city_name: str, date_str: str) -> dict | None:
                 precipitation_sum,
                 wind_speed_10m_max,
                 relative_humidity_2m_mean,
-                cloud_cover_mean
+                cloud_cover_mean,
+                sunshine_duration
             FROM analytics.final_28d_forecast
             WHERE LOWER(city) = LOWER(?)
               AND CAST(target_time AS DATE) = CAST(? AS DATE)
@@ -314,7 +302,7 @@ def load_from_duckdb(city_name: str, date_str: str) -> dict | None:
         if row is None:
             return None
 
-        temp, rain, wind, hum, cloud = row
+        temp, rain, wind, hum, cloud, sun = row
 
         # apparent_temperature_max is not stored — derive using the
         # Australian BOM apparent temperature formula:
@@ -334,7 +322,8 @@ def load_from_duckdb(city_name: str, date_str: str) -> dict | None:
             "sunshine_duration":         round(float(sun),   0),
             "apparent_temperature_max":  round(float(feels), 1),
         }
-    except Exception:
+    except Exception as exc:
+        log.warning("load_from_duckdb error for %s/%s: %s", city_name, date_str, exc)
         return None
 
 
