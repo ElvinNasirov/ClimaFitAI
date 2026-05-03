@@ -1,256 +1,563 @@
-<img src="assets/logo.png" width="300"/>
+# ClimaFitAI
 
-## ClimaFit AI
-
-## Team: The Outliers 
+## Team: The Outliers
 
 ## Tourism Weather Risk & Activity Suitability
 
 ### Project Overview
 
-This project provides data-driven weather insights to support tourism planning and decision-making. It helps travel agencies and tour operators evaluate the feasibility of outdoor activities based on both historical patterns and forecasted conditions.
+ClimaFitAI is a weather intelligence pipeline that translates historical and forecast weather data into tourism-oriented weather risk signals and activity suitability decisions.
 
-The main objectives are:
-- Minimize cancellation risks for tour operators  
-- Enhance customer satisfaction by recommending optimal dates for specific activities  
-- Provide AI-driven explanations for weather-based travel recommendations  
+The business problem is practical: travel agencies and tour operators often sell activities in advance, but rain, wind, heat, humidity, poor sunshine, or poor visibility can force last-minute cancellations, refunds, itinerary changes, and lower customer satisfaction. ClimaFitAI helps planners evaluate weather-sensitive activities earlier and choose better dates, safer alternatives, or more suitable city-activity combinations.
 
 ---
-### Data Sources
-We use the Open-Meteo API:
 
-- Historical data:
+## Project Objectives
+
+- Build a reproducible end-to-end weather data pipeline.
+- Collect historical and forecast weather data from Open-Meteo.
+- Store raw and analytics-ready data in DuckDB.
+- Validate data completeness, city coverage, date continuity, duplicates, and weather ranges.
+- Engineer seasonal, lag, rolling, trend, city, and comfort-related features.
+- Train and evaluate multi-output regression models for medium-range weather forecasting.
+- Produce a final hybrid 28-day forecast:
+  - days 1–7 from the Open-Meteo Forecast API,
+  - days 8–28 from direct horizon ML models.
+- Convert forecasted weather variables into activity suitability decisions for tourism use cases.
+
+---
+
+## Business Use Case
+
+Tourism companies need to plan activities before the exact travel date. A mountain hike, cable car trip, boat tour, beach day, city walk, or museum visit can all depend on different weather conditions.
+
+ClimaFitAI supports this planning process by answering questions such as:
+
+- Is this city suitable for outdoor tourism on a selected date?
+- Is rain, wind, heat, humidity, cloud cover, or low sunshine likely to increase operational risk?
+- Should the agency keep the original activity or suggest a safer alternative?
+- Which city and activity combination looks more suitable for the booking window?
+
+The system is not intended to replace official weather forecasts. It is designed as a planning-support layer that converts weather data into tourism-oriented risk and suitability signals.
+
+---
+
+## Cities Covered
+
+The current project scope includes five Azerbaijan tourism destinations:
+
+| City     | Tourism relevance                                        |
+| -------- | -------------------------------------------------------- |
+| Baku     | city walks, seaside activities, museums, Old City        |
+| Lankaran | coastal tourism, nature parks, tea plantations           |
+| Guba     | mountain villages, waterfalls, hiking, forest activities |
+| Gabala   | cable car, mountain resorts, Nohur Lake, hiking          |
+| Shaki    | cultural tourism, historical sites, old town walks       |
+
+---
+
+## Data Sources
+
+The project uses the Open-Meteo API.
+
+### Historical weather data
+
+```text
 https://archive-api.open-meteo.com/v1/archive
+```
 
-- Forecast data:
+### Forecast weather data
+
+```text
 https://api.open-meteo.com/v1/forecast
+```
 
-Parameters:
-- latitude, longitude
-- start_date, end_date
+### API parameters
+
+- latitude
+- longitude
+- start_date
+- end_date
 - daily weather variables
+- timezone = `auto`
+- wind_speed_unit = `kmh`
+
+`timezone="auto"` allows Open-Meteo to resolve the local timezone from the city coordinates. Since all selected cities are in Azerbaijan, the daily records are aligned to Azerbaijan local time.
+
+`wind_speed_unit="kmh"` is used to make wind speed units explicit. The project reports `wind_speed_10m_max` in kilometers per hour.
 
 ---
 
-### 👥 Team & Responsibilities
+## Technical Specifications
 
-- **Elvin:** Machine Learning & Pipeline  
-- **Roya:** Data Quality & Preprocessing, Statistical Analysis & Hypothesis Testing  
-- **Sama:** Data Quality support, Activity Recommendation Logic 
-- **Jala:** Web Interface & Presentation  
-- **Jala & Sama:** Project Ideation & Data Definition (initial project concept and selection of relevant variables)
+### Historical window
 
----
+The production pipeline is configured to use a **rolling 6-year daily historical window**, ending at the most recent complete day. This gives the model enough historical seasonality while keeping the data recent.
 
-### Technical Specifications
+### Forecast window
 
-#### 1. Dataset History Length  
-We use **5+ years of historical daily weather data (2021 up to the most recent available date)** to capture long-term seasonal patterns and climate variability across Azerbaijan.
+The Open-Meteo Forecast API provides the first **7 forecast days**. These API forecast rows are used directly in the final output because short-range forecast data is more reliable than model-generated estimates.
 
-#### 2. Dataset Granularity  
-The data is processed at a **daily granularity**, where each record represents a 24-hour summary of weather conditions for a specific city.
+### Final prediction horizon
 
-#### 3. Prediction Horizon  
-The project targets **medium-range forecasting (up to 28 days)**, aligning with tourism planning and booking cycles.
+The final system produces a **28-day forecast**:
 
----
+| Forecast days | Source                   |
+| ------------: | ------------------------ |
+|           1–7 | Open-Meteo Forecast API  |
+|          8–28 | ML direct horizon models |
 
-## Targets
+### Granularity
 
-We use a **multi-output regression model** to predict key weather variables required for activity suitability decisions.
-
-- **temperature_2m_max**  
-  Predicts peak daily temperature, which is critical for outdoor comfort and heat-related constraints.
-
-- **precipitation_sum**  
-  Measures total daily rainfall, the most important factor for determining whether outdoor activities are feasible.
-
-- **wind_speed_10m_max**  
-  Captures maximum wind conditions, essential for safety-sensitive activities such as cable car and boating.
-
-- **relative_humidity_2m_mean**  
-  Represents average humidity, which affects perceived temperature and overall comfort.
-
-- **cloud_cover_mean**  
-  Indicates sky conditions and visibility, useful for assessing atmosphere (e.g., sunny vs gloomy) and fog likelihood.
+The data is processed at **daily granularity**. Each row represents one city and one calendar day.
 
 ---
 
-## Features
+## Target Variables
 
-### Core & Derived Weather Features
+The model predicts five weather variables required for activity suitability decisions.
 
-- **apparent_temperature_max**  
-  Represents perceived temperature (“feels like”), providing additional context for human comfort.
-
-- **sunshine_duration**  
-  Reflects how sunny a day is, providing additional context for outdoor activity quality and user experience.
-
-- **city (encoded)**  
-  Captures location-specific climate patterns across regions (Baku, Lankaran, Guba, Gabala, Shaki).
-
----
-
-### Calendar Features
-
-- **month**  
-  Helps the model capture seasonal patterns within the May–June period.
-
-- **day_of_month**  
-  Provides finer time progression within each month, allowing the model to learn gradual weather changes.
+| Target                      | Unit | Why it matters                                                                   |
+| --------------------------- | ---: | -------------------------------------------------------------------------------- |
+| `temperature_2m_max`        |   °C | Outdoor comfort, heat risk, seasonal suitability                                 |
+| `precipitation_sum`         |   mm | Rain risk, cancellation risk, outdoor feasibility                                |
+| `wind_speed_10m_max`        | km/h | Safety risk for boating, cable cars, mountain activities, exposed outdoor routes |
+| `relative_humidity_2m_mean` |    % | Perceived comfort, heat stress, humid-weather discomfort                         |
+| `cloud_cover_mean`          |    % | Visibility, atmosphere, sunshine quality, gloomy-weather risk                    |
 
 ---
 
-### Lag Features (Previous Day Signals)
+## Feature Engineering
 
-- **temperature_lag_1**  
-  Yesterday’s temperature, used to model short-term continuity in temperature trends.
+The model-ready table combines raw Open-Meteo variables with derived features that represent seasonality, recent weather memory, city differences, comfort, and short-term trends.
 
-- **precipitation_lag_1**  
-  Previous day’s rainfall, helping capture ongoing rain patterns.
+### Core weather and comfort features
 
-- **wind_lag_1**  
-  Yesterday’s wind speed, useful for modeling wind persistence.
+| Feature                    |  Unit | Description                                                     |
+| -------------------------- | ----: | --------------------------------------------------------------- |
+| `apparent_temperature_max` |    °C | Perceived maximum temperature; useful for comfort and heat risk |
+| `sunshine_duration`        |   sec | Daily sunshine duration                                         |
+| `comfort_gap`              |    °C | Difference between apparent and actual maximum temperature      |
+| `sunshine_ratio`           | ratio | Share of the day with sunshine                                  |
 
-- **humidity_lag_1**  
-  Previous day’s humidity, supporting short-term atmospheric continuity.
+### City and calendar features
+
+| Feature        | Unit | Description                                            |
+| -------------- | ---: | ------------------------------------------------------ |
+| `city_encoded` |    — | Encoded city identifier for location-specific patterns |
+| `month`        |    — | Calendar month                                         |
+| `day_of_month` |    — | Day within the month                                   |
+| `day_sin`      |    — | Cyclical day-of-year sine feature                      |
+| `day_cos`      |    — | Cyclical day-of-year cosine feature                    |
+
+### Lag features
+
+Lag features allow the model to use recent weather state when predicting future conditions.
+
+| Feature group      | Examples                                                            | Description                         |
+| ------------------ | ------------------------------------------------------------------- | ----------------------------------- |
+| Temperature lags   | `temperature_lag_1`, `temperature_lag_3`, `temperature_lag_7`       | Previous temperature values by city |
+| Precipitation lags | `precipitation_lag_1`, `precipitation_lag_3`, `precipitation_lag_7` | Previous rainfall values by city    |
+| Wind lags          | `wind_lag_1`, `wind_lag_3`                                          | Previous wind speed values by city  |
+| Humidity lags      | `humidity_lag_1`, `humidity_lag_3`                                  | Previous humidity values by city    |
+
+### Rolling features
+
+Rolling features smooth short-term fluctuations and capture recent weather trends without using the current target day.
+
+| Feature                 | Unit | Description                                 |
+| ----------------------- | ---: | ------------------------------------------- |
+| `temperature_3d_avg`    |   °C | Previous 3-day average temperature          |
+| `temperature_7d_avg`    |   °C | Previous 7-day average temperature          |
+| `temperature_14d_avg`   |   °C | Previous 14-day average temperature         |
+| `precipitation_3d_sum`  |   mm | Previous 3-day rainfall sum                 |
+| `precipitation_7d_sum`  |   mm | Previous 7-day rainfall sum                 |
+| `precipitation_14d_sum` |   mm | Previous 14-day rainfall sum                |
+| `wind_3d_avg`           | km/h | Previous 3-day average wind speed           |
+| `wind_7d_avg`           | km/h | Previous 7-day average wind speed           |
+| `humidity_7d_avg`       |    % | Previous 7-day average humidity             |
+| `humidity_14d_avg`      |    % | Previous 14-day average humidity            |
+| `cloud_cover_7d_avg`    |    % | Previous 7-day average cloud cover          |
+| `rainy_days_7d`         | days | Number of rainy days in the previous 7 days |
+
+### Trend features
+
+| Feature                  |              Unit | Description                  |
+| ------------------------ | ----------------: | ---------------------------- |
+| `temperature_trend_1d`   |                °C | One-day temperature change   |
+| `humidity_trend_1d`      | percentage points | One-day humidity change      |
+| `wind_trend_1d`          |              km/h | One-day wind speed change    |
+| `precipitation_trend_1d` |                mm | One-day precipitation change |
 
 ---
 
-### Rolling Features (Short-Term Trends)
+## Modeling Approach
 
-- **temperature_3d_avg**  
-  3-day average temperature, capturing recent warming or cooling trends.
+The project uses a **multi-output regression** setup because activity suitability depends on several weather variables at the same time. Predicting temperature, precipitation, wind, humidity, and cloud cover together creates one consistent weather scenario for downstream decision logic.
 
-- **precipitation_7d_sum**  
-  Total rainfall over the past 7 days, indicating prolonged wet conditions.
+### Evaluation strategy
 
-- **wind_3d_avg**  
-  3-day average wind speed, smoothing short-term fluctuations.
+The modeling notebook uses a time-based backtesting strategy. This is important because weather forecasting is chronological: the model must learn from the past and predict future dates.
 
-- **humidity_7d_avg**  
-  7-day average humidity, reflecting persistent atmospheric conditions.
+Candidate models include:
 
----
-## 🧠 Feature Table
+- Dummy baseline
+- Ridge regression
+- Random Forest
+- Extra Trees
+- Gradient Boosting
+- XGBoost
 
-| Source | Feature Name | Unit | Aggregation |
-|--------|-------------|------|-------------|
-| Open-Meteo | apparent_temperature_max | °C | daily max |
-| Open-Meteo | sunshine_duration | sec | daily sum |
-| Derived | city_encoded | — | categorical encoding |
-| Derived | month | — | extracted from date |
-| Derived | day_of_month | — | extracted from date |
-| Derived | temperature_2m_max_lag_1 | °C | 1-day lag |
-| Derived | precipitation_sum_lag_1 | mm | 1-day lag |
-| Derived | wind_speed_10m_max_lag_1 | km/h | 1-day lag |
-| Derived | relative_humidity_2m_mean_lag_1 | % | 1-day lag |
-| Derived | temperature_2m_max_3d_avg | °C | 3-day rolling mean |
-| Derived | precipitation_sum_7d_sum | mm | 7-day rolling sum |
-| Derived | wind_speed_10m_max_3d_avg | m/s | 3-day rolling mean |
-| Derived | relative_humidity_2m_mean_7d_avg | % | 7-day rolling mean |
+The final selected model for the 28-day ML extension is:
 
----
-## Model Approach
+```text
+GradientBoostingRegressor wrapped in MultiOutputRegressor
+```
 
-We use historical data for model training and evaluation, applying a time-based split to ensure realistic performance assessment.
+### Why direct horizon models?
 
-Additionally, we integrate **7-day forecast data from the API** for short-term activity suitability decisions.
+The pipeline trains separate direct models for future horizons used after the API forecast window. This avoids recursively feeding model predictions back into the model and keeps horizon-specific behavior explicit.
 
-For medium-range predictions, we use a **multi-output regression model (Random Forest Regressor)** to predict all target variables simultaneously.
+Final forecast strategy:
 
-This approach allows us to:
-- maintain a clean and unified forecasting pipeline  
-- capture relationships between multiple weather variables  
-- generate consistent inputs for downstream activity suitability decisions  
+```text
+Days 1–7  → Open-Meteo Forecast API
+Days 8–28 → ML direct horizon models
+```
 
 ---
 
-## ⚙️ System Flow
+## Model Evaluation Summary
 
-**1. Data Sources**
-- Historical Weather Data (Open-Meteo API)
-- 7-Day Forecast Data (Open-Meteo API)
+The 28-day backtest shows that model performance differs by weather target.
 
-**2. Data Processing**
-- Data Cleaning & Validation
-- Feature Engineering  
-  - Lag features  
-  - Rolling averages  
-  - Calendar features  
+| Target                      |     R² | Interpretation                                             |
+| --------------------------- | -----: | ---------------------------------------------------------- |
+| `temperature_2m_max`        |  0.768 | Strong; seasonal and persistent patterns are captured well |
+| `precipitation_sum`         | -0.016 | Weak; rainfall is irregular and event-driven               |
+| `wind_speed_10m_max`        |  0.112 | Limited but still useful as a broad wind-risk signal       |
+| `relative_humidity_2m_mean` |  0.357 | Moderate; useful for comfort-risk estimation               |
+| `cloud_cover_mean`          |  0.182 | Difficult but still useful as a broad sky-condition signal |
 
-**3. Modeling**
-- Multi-output Regression Model (Random Forest Regressor)
+The model is strongest for temperature and weaker for precipitation and cloud cover. This is expected because rainfall and sky conditions are more event-driven and harder to predict at a 28-day horizon. For tourism planning, the output should be interpreted as a **medium-range risk signal**, not as an exact meteorological forecast.
 
-**4. Predictions**
-- Predicted Weather Variables:
-  - Temperature  
-  - Precipitation  
-  - Wind Speed  
-  - Humidity  
-  - Cloud Cover  
+---
 
-**5. AI Agent Layer**
-- Activity suitability decision system
+## Data Quality Checks
 
-**6. Final Output**
-- Activity suitability (Suitable / Risky / Not Suitable)
-- Natural language explanation
+The project includes automated quality checks before modeling.
 
+Checked dimensions:
 
-## 📅 Project Timeline
+- missing values
+- duplicate rows
+- duplicate city-date records
+- city coverage
+- date coverage
+- missing dates
+- column consistency between historical and forecast data
+- realistic weather value ranges
 
-| Date | Daily Activities |
-|------|------------------|
-| 20 Apr | Project setup, repository creation, explored Open-Meteo API, selected cities and weather variables |
-| 21 Apr | Built ingestion module, fetched 5+ years of historical data and 7-day forecast, saved raw data as parquet |
-| 22 Apr | Set up DuckDB database, created schemas, loaded raw data into database |
-| 23 Apr | Performed data cleaning, checked missing values and data consistency |
-| 24 Apr | Worked on data quality checks and initial feature engineering (lags, basic flags, date features) |
-| 25 Apr | Prepared model-ready dataset and stored it in DuckDB; initial website development started |
-| 26 Apr | Started exploratory data analysis (EDA), analyzed distributions and trends for May–June |
-| 27 Apr | Started model development and initial training; began website development (in progress) |
-| 28 Apr | Continued model work and started pipeline development (pipeline orchestration in progress) |
-| 29 Apr | Planned: model improvement and evaluation; continue website development |
-| 30 Apr | Planned: final integration, presentation preparation, and project submission |
+The pipeline stops if critical quality checks fail. This protects the model from training on incomplete, duplicated, out-of-scope, or physically unrealistic data.
+
+---
+
+## Statistical Analysis
+
+The EDA and statistical analysis support the feature engineering and modeling decisions.
+
+Key methods:
+
+- distribution analysis by city
+- correlation matrix
+- Spearman correlation for non-linear or non-normal relationships
+- normality checks
+- variance checks
+- Kruskal-Wallis tests for city-level differences
+- Mann-Whitney post-hoc comparisons
+- Benjamini-Hochberg correction for multiple testing
+- effect-size interpretation
+
+Key conclusion:
+
+Weather conditions differ by city and by season. This supports the use of city encoding, calendar features, lag features, rolling features, and comfort-related features in the forecasting model.
+
+---
+
+## Activity Suitability Logic
+
+The final forecast feeds a rule-based activity suitability layer. The logic evaluates forecasted weather variables and classifies conditions into tourism-relevant categories such as:
+
+- indoor activity preference
+- hot-weather activity preference
+- perfect outdoor conditions
+- cool-weather activity preference
+- mixed / manageable conditions
+
+The decision logic considers variables such as precipitation, wind, apparent temperature, humidity, cloud cover, and sunshine duration. City-specific suggestions are then selected based on the activity category.
+
+---
+
+## System Flow
+
+```text
+Open-Meteo API
+→ raw parquet files
+→ DuckDB raw tables
+→ raw project-scope gate
+→ cleaning
+→ quality gate
+→ feature engineering
+→ analytics.model_features
+→ direct horizon ML models
+→ analytics.final_28d_forecast
+→ activity suitability logic / website
+```
+
+Main DuckDB tables:
+
+| Table                          | Purpose                                            |
+| ------------------------------ | -------------------------------------------------- |
+| `raw.historical`               | Raw historical daily weather data                  |
+| `raw.forecast`                 | Raw 7-day forecast data                            |
+| `analytics.model_features`     | Cleaned and feature-engineered model-ready dataset |
+| `analytics.final_28d_forecast` | Final hybrid 28-day city-level forecast            |
+
+---
 
 ## Repository Structure
 
-```
+```text
 m5-project-weather-pipeline/
+├── .github/
+│   └── workflows/
+│       └── weather_pipeline.yml
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
-
-├── src/
-│   ├── init.py
-│   ├── config.py
-│   ├── ingestion.py
-│   ├── db.py      ← DuckDB connection & queries
-│   ├── cleaning.py
-│   ├── features.py
-│   ├── quality_checks.py
-│   └── pipeline.py
-
+├── assets/
+│   └── logo.png
+├── daily-briefs/
+│   ├── day-01-project-kickoff.md
+│   ├── day-02-data-ingestion.md
+│   ├── day-03-database-design.md
+│   ├── day-04-data-cleaning.md
+│   ├── day-06-eda.md
+│   ├── day-07-statistical-analysis.md
+│   ├── day-08-predictive-modeling.md
+│   └── day-09-final-presentation.md
+├── data/
+│   ├── raw/
+│   │   └── .gitkeep
+│   └── processed/
+│       └── .gitkeep
 ├── notebooks/
 │   ├── 01_data_ingestion.ipynb
 │   ├── 02_data_quality_checks.ipynb
 │   ├── 03_eda_and_trends.ipynb
-│   └── 04_modeling.ipynb
-
-├── data/
-│   ├── weather.duckdb    ←  MAIN DATABASE
-│   └── raw/
-│       ├── historical/
-│       └── forecast/
-
+│   ├── 04_modeling.ipynb
+│   └── 05_pipeline.ipynb
 ├── reports/
-│   ├── figures/
-│   └── final_report.md
-
-└── logs/
+│   ├── final_report.md
+│   └── figures/
+│       ├── feature_group_ablation_28d.png
+│       ├── feature_importance_28d.png
+│       ├── final_28d_forecast_baku_temperature_2m_max.png
+│       ├── final_28d_forecast_guba_temperature_2m_max.png
+│       ├── may_june_tourism_risk_by_city.png
+│       ├── model_error_by_horizon.png
+│       ├── model_rmse_by_target_28d.png
+│       ├── monthly_temperature_by_city.png
+│       ├── temperature_rmse_by_city_28d.png
+│       ├── weather_correlation_matrix.png
+│       └── weather_distribution_by_city.png
+├── run_pipeline.bat
+├── setup_and_run.bat
+├── run_pipeline.sh
+├── setup_and_run.sh
+└── src/
+    ├── __init__.py
+    ├── config.py
+    ├── ingestion.py
+    ├── db.py
+    ├── cleaning.py
+    ├── quality_checks.py
+    ├── features.py
+    ├── pipeline.py
+    └── weather_logic.py
 ```
 
+Data files and DuckDB database artifacts are generated locally and are not committed to the repository.
 
+---
 
+## Team & Responsibilities
 
+| Team member     | Main responsibility                                                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Elvin**       | ML & Pipeline Lead: horizon-aware modeling, model evaluation, pipeline orchestration, GitHub Actions validation, source-code cleanup |
+| **Roya**        | Data quality and preprocessing, statistical analysis, hypothesis testing                                                             |
+| **Sama**        | Data quality support, activity recommendation logic                                                                                  |
+| **Jala**        | Web interface and presentation                                                                                                       |
+| **Jala & Sama** | Project ideation and data definition, including initial concept and variable selection                                               |
+
+---
+
+## Project Timeline
+
+| Date   | Work completed                                                                                        |
+| ------ | ----------------------------------------------------------------------------------------------------- |
+| 20 Apr | Project setup, repository creation, Open-Meteo API exploration, selected cities and weather variables |
+| 21 Apr | Built ingestion module, fetched historical and forecast data, saved raw data as parquet               |
+| 22 Apr | Set up DuckDB database, created schemas, loaded raw data into database                                |
+| 23 Apr | Performed cleaning, missing-value checks, duplicate checks, and consistency checks                    |
+| 24 Apr | Built data quality checks and initial feature engineering                                             |
+| 25 Apr | Prepared model-ready dataset and stored it in DuckDB                                                  |
+| 26 Apr | Completed EDA for weather distributions, trends, and city-level patterns                              |
+| 27 Apr | Started modeling and activity suitability integration                                                 |
+| 28 Apr | Developed pipeline orchestration and model evaluation workflow                                        |
+| 29 Apr | Improved model evaluation, horizon experiments, feature importance, and ablation analysis             |
+| 30 Apr | Final integration, GitHub Actions validation, figures, README, and presentation preparation           |
+
+---
+
+## How to Run the Project
+
+The project is designed to run on Windows, macOS, and Linux.
+
+### 1. Create and activate a virtual environment
+
+```bash
+python -m venv .venv
+```
+
+Windows PowerShell / Command Prompt:
+
+```bat
+.venv\Scripts\activate
+```
+
+macOS / Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+### 2. Install dependencies
+
+```bash
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 3. Run the full pipeline
+
+Use module execution from the repository root:
+
+```bash
+python -m src.pipeline
+```
+
+This command is cross-platform and avoids import-path issues that can happen with direct script execution such as `python src/pipeline.py`.
+
+The pipeline will:
+
+1. create DuckDB schemas,
+2. fetch fresh historical and forecast data,
+3. save raw parquet files,
+4. load raw data into DuckDB,
+5. run project-scope validation,
+6. clean and validate historical data,
+7. build model features,
+8. train direct horizon models,
+9. create `analytics.final_28d_forecast`.
+
+### 4. Optional Windows shortcuts
+
+```bat
+setup_and_run.bat
+```
+
+or
+
+```bat
+run_pipeline.bat
+```
+
+### 5. Optional macOS / Linux shortcuts
+
+```bash
+chmod +x setup_and_run.sh run_pipeline.sh
+./setup_and_run.sh
+```
+
+or, after the environment is already set up:
+
+```bash
+./run_pipeline.sh
+```
+
+### 6. Run notebooks
+
+Start Jupyter from the repository root:
+
+```bash
+jupyter notebook
+```
+
+Then open notebooks in this order:
+
+```text
+01_data_ingestion.ipynb
+02_data_quality_checks.ipynb
+03_eda_and_trends.ipynb
+04_modeling.ipynb
+05_pipeline.ipynb
+```
+
+---
+
+## Automation
+
+The repository includes a GitHub Actions workflow:
+
+```text
+.github/workflows/weather_pipeline.yml
+```
+
+The workflow:
+
+- installs dependencies,
+- runs the full pipeline on Ubuntu,
+- validates that the final forecast table contains 140 rows:
+
+```text
+5 cities × 28 forecast days = 140 rows
+```
+
+It also uploads the generated DuckDB database as a workflow artifact.
+
+---
+
+## Limitations and Next Steps
+
+- The model is stronger for temperature than for precipitation, wind, and cloud cover.
+- Daily precipitation is irregular and difficult to predict at medium range.
+- The system uses daily aggregates, not hourly forecasts.
+- The current scope covers five cities in Azerbaijan.
+- Activity suitability rules are designed for planning support and should be calibrated further with real tourism operator feedback.
+- Future work can add formal unit tests, model persistence, more cities, and improved precipitation risk classification.
+
+---
+
+## Final Project Summary
+
+ClimaFitAI demonstrates a complete weather intelligence workflow for tourism planning:
+
+```text
+weather data → validation → feature engineering → forecasting → activity suitability
+```
+
+The strongest parts of the project are the reproducible pipeline, DuckDB storage design, automated quality gates, rich feature engineering, time-based model evaluation, direct horizon forecasting, and hybrid 28-day forecast strategy. The system gives tourism planners an earlier view of weather risk so they can reduce last-minute cancellations and choose more suitable activities for each city and date.
+
+The project should be evaluated as a practical planning-support system, not as a perfect meteorological forecast. Its strongest predictive target is temperature, while precipitation and cloud cover remain harder because they are more event-driven. This limitation is explicitly handled in the project interpretation and makes the final output more realistic and defensible.
