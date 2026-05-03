@@ -334,14 +334,6 @@ m5-project-weather-pipeline/
 ├── .github/
 │   └── workflows/
 │       └── weather_pipeline.yml
-├── README.md
-├── final_report.md
-├── requirements.txt
-├── requirements-web.txt
-├── render.yaml
-├── .gitignore
-├── run_pipeline.bat
-├── setup_and_run.bat
 ├── assets/
 │   └── logo.png
 ├── daily-briefs/
@@ -353,33 +345,62 @@ m5-project-weather-pipeline/
 │   ├── day-07-statistical-analysis.md
 │   ├── day-08-predictive-modeling.md
 │   └── day-09-final-presentation.md
-├── figures/
-│   ├── feature_group_ablation_28d.png
-│   ├── feature_importance_28d.png
-│   ├── final_28d_forecast_baku_temperature_2m_max.png
-│   ├── final_28d_forecast_guba_temperature_2m_max.png
-│   ├── may_june_tourism_risk_by_city.png
-│   ├── model_error_by_horizon.png
-│   ├── model_rmse_by_target_28d.png
-│   ├── monthly_temperature_by_city.png
-│   ├── temperature_rmse_by_city_28d.png
-│   ├── weather_correlation_matrix.png
-│   └── weather_distribution_by_city.png
-├── 01_data_ingestion.ipynb
-├── 02_data_quality_checks.ipynb
-├── 03_eda_and_trends.ipynb
-├── 04_modeling.ipynb
-├── 05_pipeline.ipynb
-└── src/
-    ├── __init__.py
-    ├── city_activities.json
-    ├── config.py
-    ├── ingestion.py
-    ├── db.py
-    ├── cleaning.py
-    ├── quality_checks.py
-    ├── features.py
-    └── pipeline.py
+├── data/
+│   ├── raw/
+│   ├── processed/
+│   └── weather.duckdb
+├── notebooks/
+│   ├── 01_data_ingestion.ipynb
+│   ├── 02_data_quality_checks.ipynb
+│   ├── 03_eda_and_trends.ipynb
+│   ├── 04_modeling.ipynb
+│   └── 05_pipeline.ipynb
+├── reports/
+│   ├── final_report.md
+│   └── figures/
+│       ├── feature_group_ablation_28d.png
+│       ├── feature_importance_28d.png
+│       ├── final_28d_forecast_baku_temperature_2m_max.png
+│       ├── final_28d_forecast_guba_temperature_2m_max.png
+│       ├── may_june_tourism_risk_by_city.png
+│       ├── model_error_by_horizon.png
+│       ├── model_rmse_by_target_28d.png
+│       ├── monthly_temperature_by_city.png
+│       ├── temperature_rmse_by_city_28d.png
+│       ├── weather_correlation_matrix.png
+│       └── weather_distribution_by_city.png
+├── src/
+│   ├── __init__.py
+│   ├── city_activities.json
+│   ├── config.py
+│   ├── ingestion.py
+│   ├── db.py
+│   ├── cleaning.py
+│   ├── quality_checks.py
+│   ├── features.py
+│   └── pipeline.py
+├── website/
+│   ├── README.md
+│   ├── backend/
+│   │   ├── main.py
+│   │   └── requirements.txt
+│   └── frontend/
+│       ├── index.html
+│       ├── styles/
+│       │   └── index.css
+│       └── src/
+│           ├── app.js
+│           └── components/
+│               ├── ActivityList.js
+│               └── WeatherCard.js
+├── .gitignore
+├── Evaluation Review.md
+├── README.md
+├── render.yaml
+├── requirements.txt
+├── requirements-web.txt
+├── run_pipeline.bat
+└── setup_and_run.bat
 ```
 
 Data files and DuckDB database artifacts are generated locally and are not committed to the repository.
