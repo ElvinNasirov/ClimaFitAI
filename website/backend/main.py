@@ -14,6 +14,7 @@ Every forecast request reads pre-computed results from:
 
 import sys
 import os
+import math
 import threading
 import time
 import logging
@@ -133,6 +134,28 @@ def _run_pipeline_background(refresh_data: bool = True) -> None:
         _pipeline_lock.release()
 
 
+def _has_fresh_forecast() -> bool:
+    """
+    Returns True if analytics.final_28d_forecast already contains rows
+    for today or later, meaning a previous pipeline run's data is still valid.
+    Used on startup to avoid re-running the expensive pipeline unnecessarily.
+    """
+    if not DB_PATH.exists():
+        return False
+    try:
+        conn = duckdb.connect(str(DB_PATH), read_only=True)
+        count = conn.execute("""
+            SELECT COUNT(*)
+            FROM analytics.final_28d_forecast
+            WHERE CAST(target_time AS DATE) >= CURRENT_DATE
+        """).fetchone()[0]
+        conn.close()
+        return count > 0
+    except Exception as exc:
+        log.warning("Could not check DuckDB for fresh data: %s", exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Background scheduler — re-runs pipeline every REFRESH_INTERVAL_HOURS
 # ---------------------------------------------------------------------------
@@ -164,17 +187,32 @@ def _start_scheduler() -> None:
 def on_startup() -> None:
     """
     Triggered once when `uvicorn main:app` starts.
-    Kicks off the pipeline in a background thread so the server accepts
-    requests immediately while the pipeline warms up in the background.
+
+    Strategy:
+      - If DuckDB already has forecast rows for today or later, the data is
+        still valid — skip the pipeline and serve immediately.
+      - If data is missing or stale, kick off the pipeline in a background
+        thread so the server accepts requests while it warms up.
     """
-    log.info("🚀 Server starting — launching pipeline in background thread...")
-    t = threading.Thread(
-        target=_run_pipeline_background,
-        kwargs={"refresh_data": True},
-        daemon=True,
-        name="pipeline-startup",
-    )
-    t.start()
+    if _has_fresh_forecast():
+        log.info(
+            "✅ Fresh forecast data found in DuckDB — skipping startup pipeline run. "
+            "Next auto-refresh in up to %d hours.",
+            REFRESH_INTERVAL_HOURS,
+        )
+        # Mark as 'already ran' so the 503 guard in /forecast doesn't block requests
+        pipeline_state["run_count"]  = 1
+        pipeline_state["last_run_at"] = datetime.utcnow().isoformat() + "Z"
+    else:
+        log.info("🚀 No fresh data found — launching pipeline in background thread...")
+        t = threading.Thread(
+            target=_run_pipeline_background,
+            kwargs={"refresh_data": True},
+            daemon=True,
+            name="pipeline-startup",
+        )
+        t.start()
+
     _start_scheduler()
 
 
@@ -277,10 +315,15 @@ def load_from_duckdb(city_name: str, date_str: str) -> dict | None:
             return None
 
         temp, rain, wind, hum, cloud = row
-        # sunshine_duration / apparent_temperature_max are not stored in the
-        # forecast table — derive plausible values from what we have.
-        sun   = max(0.0, (1.0 - cloud / 100.0) * 36000.0)
-        feels = round(temp - (wind * 0.5), 1)
+
+        # apparent_temperature_max is not stored — derive using the
+        # Australian BOM apparent temperature formula:
+        #   AT = T + 0.33*e - 0.70*ws - 4.0
+        # where e = vapour pressure (hPa), ws = wind speed (m/s)
+        wind_ms = wind / 3.6                                      # km/h → m/s
+        e_sat   = 6.1078 * math.exp(17.269 * temp / (temp + 237.3))  # saturation vapour pressure
+        e       = e_sat * (hum / 100.0)                           # actual vapour pressure
+        feels   = round(temp + 0.33 * e - 0.70 * wind_ms - 4.00, 1)
 
         return {
             "temperature_2m_max":        round(float(temp),  1),
