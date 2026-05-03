@@ -1,3 +1,5 @@
+<img src="assets/logo.png" width="300"/>
+
 # ClimaFitAI
 
 ## Team: The Outliers
