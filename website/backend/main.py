@@ -105,6 +105,14 @@ pipeline_state = {
 
 REFRESH_INTERVAL_HOURS = 24        # how often the scheduler re-runs
 
+RUN_PIPELINE_ON_STARTUP = (
+    os.getenv("RUN_PIPELINE_ON_STARTUP", "false").lower() == "true"
+)
+
+ENABLE_SCHEDULER = (
+    os.getenv("ENABLE_SCHEDULER", "false").lower() == "true"
+)
+
 
 # ---------------------------------------------------------------------------
 # Core pipeline runner  (called from startup + scheduler + /refresh)
@@ -191,24 +199,33 @@ def _start_scheduler() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     """
-    Triggered once when `uvicorn main:app` starts.
+    Triggered once when the server starts.
 
-    Strategy:
-      - Check if fresh data exists in DuckDB.
-      - If yes, serve requests immediately.
-      - If no (e.g. first deploy on Render), run the pipeline.
-      - Start the 24h background scheduler.
+    For Render demo deployment, the backend should use the existing
+    DuckDB forecast snapshot instead of running the full ML pipeline
+    on startup.
     """
-    _start_scheduler()
+    log.info("Server starting.")
+    log.info("PROJECT_ROOT = %s", PROJECT_ROOT)
+    log.info("DB_PATH = %s", DB_PATH)
+    log.info("DB exists = %s", DB_PATH.exists())
 
-    if _has_fresh_forecast():
-        log.info("✅ Startup: fresh data found in DuckDB. Pipeline will NOT auto-run.")
-        pipeline_state["run_count"]  = 1
-        pipeline_state["last_run_at"] = datetime.utcnow().isoformat() + "Z"
+    if RUN_PIPELINE_ON_STARTUP:
+        log.info("RUN_PIPELINE_ON_STARTUP=true — launching pipeline in background thread.")
+        t = threading.Thread(
+            target=_run_pipeline_background,
+            kwargs={"refresh_data": True},
+            daemon=True,
+            name="pipeline-startup",
+        )
+        t.start()
     else:
-        log.info("⚠️ Startup: No fresh data found. Auto-running pipeline...")
-        # Since run_count is 0, the /forecast endpoint will correctly return 503 until it finishes
-        threading.Thread(target=_run_pipeline_background, kwargs={"refresh_data": True}, daemon=True).start()
+        log.info("RUN_PIPELINE_ON_STARTUP=false — using existing DuckDB snapshot.")
+
+    if ENABLE_SCHEDULER:
+        _start_scheduler()
+    else:
+        log.info("ENABLE_SCHEDULER=false — scheduler disabled.")
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +356,84 @@ def load_from_duckdb(city_name: str, date_str: str) -> dict | None:
 # API Endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/debug/db")
+def debug_db() -> dict:
+    """
+    Debug endpoint for Render deployment.
+    Shows whether the deployed backend can see DuckDB and the final forecast table.
+    """
+    info = {
+        "project_root": str(PROJECT_ROOT),
+        "db_path": str(DB_PATH),
+        "db_exists": DB_PATH.exists(),
+    }
+
+    if not DB_PATH.exists():
+        info["error"] = "DuckDB file does not exist at DB_PATH."
+        return info
+
+    try:
+        conn = duckdb.connect(str(DB_PATH), read_only=True)
+
+        table_exists = conn.execute("""
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = 'analytics'
+              AND table_name = 'final_28d_forecast'
+        """).fetchone()[0]
+
+        info["final_table_exists"] = bool(table_exists)
+
+        if table_exists:
+            summary = conn.execute("""
+                SELECT
+                    COUNT(*) AS row_count,
+                    MIN(target_time) AS min_target_time,
+                    MAX(target_time) AS max_target_time
+                FROM analytics.final_28d_forecast
+            """).fetchone()
+
+            info["row_count"] = summary[0]
+            info["min_target_time"] = str(summary[1])
+            info["max_target_time"] = str(summary[2])
+
+            cities = conn.execute("""
+                SELECT city, COUNT(*) AS rows
+                FROM analytics.final_28d_forecast
+                GROUP BY city
+                ORDER BY city
+            """).fetchall()
+
+            info["cities"] = [
+                {"city": city, "rows": rows}
+                for city, rows in cities
+            ]
+
+            baku_sample = conn.execute("""
+                SELECT city, target_time, forecast_horizon
+                FROM analytics.final_28d_forecast
+                WHERE LOWER(city) = LOWER('Baku')
+                ORDER BY target_time
+                LIMIT 10
+            """).fetchall()
+
+            info["baku_sample"] = [
+                {
+                    "city": city,
+                    "target_time": str(target_time),
+                    "forecast_horizon": horizon,
+                }
+                for city, target_time, horizon in baku_sample
+            ]
+
+        conn.close()
+        return info
+
+    except Exception as exc:
+        info["error"] = str(exc)
+        return info
+
+
 @app.post("/forecast", response_model=ForecastResponse)
 def get_forecast(request: ForecastRequest) -> ForecastResponse:
     """
@@ -355,6 +450,13 @@ def get_forecast(request: ForecastRequest) -> ForecastResponse:
                 f"'{request.location}' is not a valid location. "
                 f"Choose from: {', '.join(VALID_CITIES.keys())}."
             ),
+        )
+
+    # If pipeline crashed on startup, return the error
+    if pipeline_state["last_error"] and pipeline_state["run_count"] == 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pipeline crashed during initialization: {pipeline_state['last_error']}"
         )
 
     # If pipeline is still running on startup, let the client know
